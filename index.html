@@ -1,44 +1,34 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Web Football Prototype</title>
-  <link rel="stylesheet" href="style.css" />
-  <!-- Three.js CDN -->
-  <script src="https://unpkg.com/three@0.152.2/build/three.min.js"></script>
+    <title>3D Football Demo</title>
+    <style>
+        body { margin: 0; overflow: hidden; background: #0b0b0b; }
+        #scoreboard {
+            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+            font-size: 32px; font-weight: bold; color: white; font-family: Arial;
+            background: rgba(0,0,0,0.4); padding: 10px 25px; border-radius: 10px;
+        }
+        .throw-btn {
+            position: absolute;
+            background: rgba(255,255,255,0.9);
+            padding: 5px 10px;
+            border-radius: 6px;
+            color: black;
+            font-size: 18px;
+            font-weight: bold;
+            pointer-events: none;
+        }
+    </style>
 </head>
 <body>
-  <div id="ui">
-    <div id="topbar">
-      <div>
-        Team:
-        <select id="teamSelect">
-          <option value="home">Home (Blue)</option>
-          <option value="away">Away (Red)</option>
-        </select>
-        &nbsp;|&nbsp;
-        <button id="startBtn">Start Play</button>
-        <button id="resetBtn">Reset</button>
-      </div>
+    <div id="scoreboard">Score: 0</div>
+    <canvas id="game"></canvas>
 
-      <div id="scoreboard">
-        <span id="homeName">HOME</span>
-        <span id="homeScore">0</span>
-        <span> - </span>
-        <span id="awayScore">0</span>
-        <span id="awayName">AWAY</span>
-      </div>
-    </div>
+    <!-- THROW BUTTONS APPEAR HERE -->
+    <div id="ui"></div>
 
-    <div id="controls">
-      <div>Controls: WASD = move QB | 1-4 = select receiver | P = pass</div>
-      <div id="messages"></div>
-    </div>
-  </div>
-
-  <div id="canvasContainer"></div>
-
-  <script src="main.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="game.js"></script>
 </body>
 </html>
