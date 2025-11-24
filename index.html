@@ -1,34 +1,70 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>3D Football Demo</title>
+    <title>3D Football Game</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #0b0b0b; }
+        body { margin:0; overflow:hidden; background:#0b0b0b; font-family:Arial; }
+
         #scoreboard {
-            position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
-            font-size: 32px; font-weight: bold; color: white; font-family: Arial;
-            background: rgba(0,0,0,0.4); padding: 10px 25px; border-radius: 10px;
+            position:absolute;
+            top:20px; left:50%;
+            transform:translateX(-50%);
+            font-size:32px;
+            color:white;
+            padding:10px 25px;
+            background:rgba(0,0,0,0.4);
+            border-radius:10px;
         }
+
+        #playcall {
+            position:absolute;
+            top:50%; left:50%;
+            transform:translate(-50%,-50%);
+            width:450px;
+            background:#111;
+            padding:25px;
+            display:none;
+            border-radius:15px;
+            color:white;
+        }
+        #playcall button {
+            width:100%;
+            padding:12px;
+            margin:6px 0;
+            background:#333;
+            color:white;
+            border:none;
+            border-radius:8px;
+            font-size:18px;
+            cursor:pointer;
+        }
+        #playcall button:hover { background:#444; }
+
         .throw-btn {
-            position: absolute;
-            background: rgba(255,255,255,0.9);
-            padding: 5px 10px;
-            border-radius: 6px;
-            color: black;
-            font-size: 18px;
-            font-weight: bold;
-            pointer-events: none;
+            position:absolute;
+            background:white;
+            color:black;
+            padding:4px 9px;
+            border-radius:6px;
+            font-weight:bold;
+            pointer-events:none;
         }
     </style>
 </head>
 <body>
-    <div id="scoreboard">Score: 0</div>
-    <canvas id="game"></canvas>
 
-    <!-- THROW BUTTONS APPEAR HERE -->
+    <div id="scoreboard">Score: 0</div>
+
+    <div id="playcall">
+        <h2>Select Play</h2>
+        <div id="play-list"></div>
+    </div>
+
+    <canvas id="game"></canvas>
     <div id="ui"></div>
 
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="game.js"></script>
+
 </body>
 </html>
