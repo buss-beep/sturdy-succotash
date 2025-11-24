@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>3D Basketball Starter (HTML + JS)</title>
+<style>
+  html,body{height:100%;margin:0;overflow:hidden;background:#111;}
+  #ui{position:fixed;left:12px;top:12px;color:#fff;font-family:Inter,Arial,sans-serif;z-index:10}
+  #ui .big{font-size:20px;font-weight:600}
+  #ui .hint{opacity:.85;margin-top:6px;font-size:13px}
+  #score{margin-top:8px;font-weight:700}
+  #btns{margin-top:8px}
+  button{padding:6px 8px;border-radius:6px;border:0;background:#2b2b2b;color:#fff;cursor:pointer}
+  canvas{display:block}
+</style>
+</head>
+<body>
+<div id="ui">
+  <div class="big">Basketball — 2K-Lite Starter</div>
+  <div class="hint">WASD to move · Mouse to look · Left click or Space to shoot · E to toggle dribble</div>
+  <div id="score">Score: <span id="score-val">0</span></div>
+  <div id="btns"><button id="reset">Reset Ball</button></div>
+</div>
+
+<script type="module">
+import * as THREE from 'https://unpkg.com/three@0.150.0/build/three.module.js';
+import { PointerLockControls } from 'https://unpkg.com/three@0.150.0/examples/jsm/controls/PointerLockControls.js';
+import * as CANNON from 'https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js';
+
+let scene, camera, renderer, clock;
+let controls;
+let world;
+let player = { pos: new THREE.Vector3(0, 1.4, 5), rotationY: 0 };
+let ballMesh, ballBody;
+let groundBody;
+let score = 0;
+let isDribbleHold = false;
+let lastShotTime = 0;
+const shootCooldown = 300; // ms
+
+init();
+animate();
+
+function init(){
+  // THREE scene
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x7fb7ff);
+  camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.1, 2000);
+  camera.position.set(0, 2.0, 6);
+
+  renderer = new THREE.WebGLRenderer({antialias:true});
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.shadowMap.enabled = true;
+  document.body.appendChild(renderer.domElement);
+
+  // Lighting
+  const hemi = new THREE.HemisphereLight(0xffffff, 0x444455, 0.9);
+  hemi.position.set(0, 200, 0);
+  scene.add(hemi);
+  const dir = new THREE.DirectionalLight(0xffffff, 0.9);
+  dir.position.set(5, 20, 10);
+  dir.castShadow = true;
+  scene.add(dir);
+
+  // Court - simple plane + lines
+  const court = new THREE.Mesh(
+    new THREE.BoxGeometry(20, 0.2, 12),
+    new THREE.MeshStandardMaterial({color:0x2b6b2b})
+  );
+  court.receiveShadow = true;
+  court.position.y = -0.1;
+  scene.add(court);
+
+  // Hoop / rim
+  createHoop(new THREE.Vector3(0,3.05,-4.5));
+
+  // Ball (mesh + physics)
+  const ballGeo = new THREE.SphereGeometry(0.24, 24, 24);
+  const ballMat = new THREE.MeshStandardMaterial({color:0xff6a00, metalness:0.1, roughness:0.8});
+  ballMesh = new THREE.Mesh(ballGeo, ballMat);
+  ballMesh.castShadow = true;
+  scene.add(ballMesh);
+
+  // Simple player marker
+  const pGeo = new THREE.CapsuleGeometry(0.25, 0.9, 4, 8);
+  const pMat = new THREE.MeshStandardMaterial({color:0x222222, opacity:0.0, transparent:true});
+  const pMesh = new THREE.Mesh(pGeo, pMat);
+  pMesh.visible = false;
+  scene.add(pMesh);
+
+  // Camera controls (pointer lock)
+  controls = new PointerLockControls(camera, renderer.domElement);
+  document.addEventListener('click', () => {
+    if (!controls.isLocked) controls.lock();
+  });
+  controls.addEventListener('lock', ()=>{ /* locked */ });
+  controls.addEventListener('unlock', ()=>{ /* unlocked */ });
+
+  // Window resize
+  window.addEventListener('resize', onResize);
+
+  // Physics world
+  world = new CANNON.World({ gravity: new CANNON.Vec3(0,-9.82,0) });
+  world.broadphase = new CANNON.SAPBroadphase(world);
+  world.solver.iterations = 8;
+
+  // Ground physics
+  const groundShape = new CANNON.Box(new CANNON.Vec3(10, 0.1, 6));
+  groundBody = new CANNON.Body({ mass: 0, shape: groundShape, position: new CANNON.Vec3(0,-0.1,0) });
+  world.addBody(groundBody);
+
+  // Ball physics
+  const ballShape = new CANNON.Sphere(0.24);
+  ballBody = new CANNON.Body({ mass: 0.6, shape: ballShape });
+  ballBody.linearDamping = 0.31;
+  ballBody.angularDamping = 0.4;
+  ballBody.position.set(0,1.6,5);
+  world.addBody(ballBody);
+
+  // Add rim colliders & score plane
+  setupRimPhysics();
+
+  // Basic movement state
+  setupInput();
+
+  // UI
+  document.getElementById('reset').addEventListener('click', resetBall);
+  clock = new THREE.Clock();
+}
+
+function createHoop(pos){
+  // backboard
+  const backMat = new THREE.MeshStandardMaterial({color:0xffffff});
+  const back = new THREE.Mesh(new THREE.BoxGeometry(1.2,0.8,0.06), backMat);
+  back.position.copy(pos).add(new THREE.Vector3(0,0.8,0.18));
+  scene.add(back);
+
+  // rim visual
+  const ringGeo = new THREE.TorusGeometry(0.45, 0.04, 16, 60);
+  const ring = new THREE.Mesh(ringGeo, new THREE.MeshStandardMaterial({color:0xff2020}));
+  ring.rotation.x = Math.PI/2;
+  ring.position.copy(pos);
+  ring.castShadow = true;
+  scene.add(ring);
+
+  // net (fake)
+  const net = new THREE.Mesh(new THREE.CylinderGeometry(0.36,0.4,0.6,10,1,true),
+    new THREE.MeshStandardMaterial({color:0xffffff, opacity:0.6, transparent:true}));
+  net.position.copy(pos).add(new THREE.Vector3(0,-0.28,0));
+  scene.add(net);
+}
+
+// ---------- Rim physics + score detection ----------
+let scorePlaneBody;
+function setupRimPhysics(){
+  // Create thin torus-like colliders by approximating rim with several small boxes around the circle
+  const rimCenter = new CANNON.Vec3(0,3.05,-4.5);
+  const pieces = 16;
+  const radius = 0.45;
+  for(let i=0;i<pieces;i++){
+    const a = (i/pieces)*Math.PI*2;
+    const x = radius*Math.cos(a);
+    const z = radius*Math.sin(a);
+    // create small box as rim segment (thin)
+    const box = new CANNON.Body({ mass:0, shape: new CANNON.Box(new CANNON.Vec3(0.06,0.02,0.12))});
+    const worldPos = rimCenter.vadd(new CANNON.Vec3(x,0,z));
+    box.position.copy(worldPos);
+    // orient box tangent to rim
+    const quat = new CANNON.Quaternion();
+    quat.setFromAxisAngle(new CANNON.Vec3(0,1,0), a);
+    box.quaternion.copy(quat);
+    world.addBody(box);
+  }
+
+  // Score detection plane - a thin box under hoop that listens for ball crossing downward
+  const plane = new CANNON.Body({ mass:0, shape: new CANNON.Box(new CANNON.Vec3(0.35,0.02,0.35)),
+    position: new CANNON.Vec3(rimCenter.x, rimCenter.y - 0.45, rimCenter.z) });
+  plane.collisionResponse = false; // don't push ball
+  world.addBody(plane);
+  scorePlaneBody = plane;
+
+  // collision event
+  world.addEventListener('beginContact', function(ev){
+    if (!ev.bodyA || !ev.bodyB) return;
+    const b1 = ev.bodyA, b2 = ev.bodyB;
+    if ((b1 === ballBody && b2 === plane) || (b2 === ballBody && b1 === plane)){
+      // ensure ball is moving downward (to avoid counting upward bounces)
+      if (ballBody.velocity.y < 0){
+        score++;
+        document.getElementById('score-val').textContent = score;
+        // small feedback: nudge ball down a bit so it falls through
+        // optionally you can respawn ball to player
+      }
+    }
+  });
+}
+
+// ---------- Input and movement ----------
+const keys = {};
+function setupInput(){
+  window.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (e.code === 'KeyE') {
+      isDribbleHold = !isDribbleHold;
+    }
+    if (e.code === 'Space') attemptShoot();
+  });
+  window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+  // mouse click to shoot
+  window.addEventListener('mousedown', (ev) => {
+    if (ev.button === 0) attemptShoot();
+  });
+}
+
+function attemptShoot(){
+  const now = performance.now();
+  if (now - lastShotTime < shootCooldown) return;
+  lastShotTime = now;
+
+  // shoot only if ball is near player (distance threshold)
+  const pPos = player.pos;
+  const bPos = new THREE.Vector3().copy(ballBody.position);
+  const dist = pPos.distanceTo(bPos);
+  if (dist < 1.4){
+    // compute forward direction from camera for shot
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    // upward arc factor: angle between camera pitch and world
+    const shootPower = 6.6; // tune for stronger/weaker shots
+    const upFactor = 1.4;
+    const impulse = new CANNON.Vec3(forward.x*shootPower, upFactor*shootPower, forward.z*shootPower);
+    ballBody.velocity.set(0,0,0);
+    ballBody.angularVelocity.set(0,0,0);
+    ballBody.applyImpulse(impulse, ballBody.position);
+  } else {
+    // if not near ball, do a pass-like short impulse (optional)
+    const forward = new THREE.Vector3();
+    camera.getWorldDirection(forward);
+    const impulse = new CANNON.Vec3(forward.x*2, 1.0, forward.z*2);
+    ballBody.applyImpulse(impulse, ballBody.position);
+  }
+}
+
+// ---------- Physics helper: keep ball near player when dribbling ----------
+function handleDribble(dt){
+  if (!isDribbleHold) return;
+  // desired position slightly in front of player
+  const dir = new THREE.Vector3();
+  camera.getWorldDirection(dir);
+  dir.y = 0; dir.normalize();
+  const desired = new THREE.Vector3().copy(player.pos).addScaledVector(dir, -0.6).add(new THREE.Vector3(0,0.9,0));
+  // move ball smoothly toward desired pos but allow bounce: we'll set position and small downward impulse
+  // Better to set velocity toward desired
+  const pos = new THREE.Vector3().copy(ballBody.position);
+  const to = new THREE.Vector3().subVectors(desired, pos);
+  const strength = 10;
+  const v = new CANNON.Vec3(to.x*strength*dt, to.y*strength*dt, to.z*strength*dt);
+  ballBody.velocity.x += v.x;
+  ballBody.velocity.y += v.y;
+  ballBody.velocity.z += v.z;
+  // small periodic downward poke to imitate dribble bounce
+  const t = performance.now()/300;
+  const bounce = Math.abs(Math.sin(t))*1.0;
+  ballBody.applyForce(new CANNON.Vec3(0, -bounce*0.05, 0), ballBody.position);
+}
+
+// ---------- Update loop ----------
+let lastTime;
+function animate(){
+  requestAnimationFrame(animate);
+  const dt = Math.min(0.05, clock.getDelta());
+  // update player position from WASD (kinematic)
+  updatePlayer(dt);
+
+  // physics step
+  world.step(1/60, dt, 3);
+
+  // dribble behavior
+  handleDribble(dt);
+
+  // sync Three meshes to physics
+  ballMesh.position.copy(ballBody.position);
+  ballMesh.quaternion.copy(ballBody.quaternion);
+
+  // camera follow (3rd-person)
+  const camTarget = new THREE.Vector3().copy(player.pos).add(new THREE.Vector3(0,1.4,0));
+  // camera offset behind the player using camera rotation (pointer controls yaw)
+  const camOffset = new THREE.Vector3(0,1.2,6);
+  // apply rotation around Y
+  const yaw = player.rotationY;
+  const cos = Math.cos(yaw), sin = Math.sin(yaw);
+  const offsetWorld = new THREE.Vector3(camOffset.x * cos + camOffset.z * sin, camOffset.y, -camOffset.x * sin + camOffset.z * cos);
+  camera.position.copy(camTarget).add(offsetWorld);
+  camera.lookAt(camTarget);
+
+  renderer.render(scene, camera);
+}
+
+// player movement
+function updatePlayer(dt){
+  const speed = 3.6;
+  const dir = new THREE.Vector3();
+  if (keys['KeyW']) dir.z -= 1;
+  if (keys['KeyS']) dir.z += 1;
+  if (keys['KeyA']) dir.x -= 1;
+  if (keys['KeyD']) dir.x += 1;
+  dir.normalize();
+
+  // rotate movement by camera yaw
+  const camDir = new THREE.Vector3();
+  camera.getWorldDirection(camDir);
+  const yaw = Math.atan2(camDir.x, camDir.z);
+  player.rotationY = yaw;
+
+  // convert local movement to world
+  const forward = new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
+  const right = new THREE.Vector3(Math.sin(yaw+Math.PI/2),0,Math.cos(yaw+Math.PI/2));
+  const move = new THREE.Vector3();
+  move.addScaledVector(forward, dir.z);
+  move.addScaledVector(right, dir.x);
+  move.normalize();
+  player.pos.addScaledVector(move, speed*dt);
+
+  // clamp to court bounds
+  player.pos.x = THREE.MathUtils.clamp(player.pos.x, -9.0, 9.0);
+  player.pos.z = THREE.MathUtils.clamp(player.pos.z, -5.5, 5.5);
+
+  // if not holding dribble and near ball, gently attract ball to player's hand for "pick up"
+  const b = new THREE.Vector3().copy(ballBody.position);
+  if (!isDribbleHold){
+    const dist = player.pos.distanceTo(b);
+    if (dist < 0.9 && ballBody.velocity.length() < 1.5){
+      // nudging ball to sit in player's hand when idle
+      const dirToHand = new THREE.Vector3().subVectors(player.pos.clone().add(new THREE.Vector3(0,1.1,0)), b).multiplyScalar(5*dt);
+      ballBody.velocity.x += dirToHand.x;
+      ballBody.velocity.y += dirToHand.y;
+      ballBody.velocity.z += dirToHand.z;
+    }
+  }
+}
+
+// Reset ball
+function resetBall(){
+  ballBody.velocity.set(0,0,0);
+  ballBody.angularVelocity.set(0,0,0);
+  ballBody.position.set(player.pos.x, player.pos.y + 1.1, player.pos.z - 0.6);
+}
+function onResize(){ camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix(); renderer.setSize(innerWidth, innerHeight); }
+</script>
+</body>
+</html>
